@@ -22,6 +22,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+import vtquery
 
 # Get environment variables ------------------------------------------------------------
 load_dotenv()
