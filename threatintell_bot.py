@@ -5,7 +5,6 @@ import asyncio
 import base64
 import logging
 import hashlib
-import ollama
 import os
 import tempfile
 from pathlib import Path
@@ -29,7 +28,7 @@ load_dotenv()
 # ---------------------------------------------------------------------------------------
 
 # Configure Menus -----------------------------------------------------------------------
-OPTION1_TEXT = "Option 1"
+OPTION1_TEXT = "Submit SHA256 Hash to Virus Total"
 OPTION2_TEXT = "Option 2"
 OPTION3_TEXT = "Upload an image"
 OPTION4_TEXT = "Option 4"
@@ -46,7 +45,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------------------
 
 # Create a menu --------------------------------------------------------------------------
-def confirm_keyboard() -> InlineKeyboardMarkup:
+def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(    inline_keyboard = [
         # Row 1
         [
@@ -71,7 +70,7 @@ def confirm_keyboard() -> InlineKeyboardMarkup:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome! What would you like to do?",
-        reply_markup=confirm_keyboard(),
+        reply_markup=start_keyboard(),
     )
     
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -86,8 +85,56 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Optionally clear the flag if you set it from button "3"
-    context.user_data.pop("awaiting_image_for_prompt", None)
-    
+    #context.user_data.pop("awaiting_image_for_prompt", None)
+        photo    = update.message.photo[-1]
+    tg_file  = await context.bot.get_file(photo.file_id)
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    await tg_file.download_to_drive(tmp_path)
+    logger.info("[+] Pending image key has been set in context.user_data")
+    context.user_data[KEY_PENDING_IMAGE] = tmp_path
+
+    # Send model and host to vision function
+    try:
+        prompt = await vision_to_prompt(
+            tmp_path,
+            model=cfg["ollama_model"],
+            host=cfg["ollama_host"],
+        )
+    except Exception as e:
+        logger.exception("Vision model error")
+        await update.message.reply_text(f"❌ Vision model error: {e}")
+        return
+
+    logger.info("[+] Received prompt from LLM")
+    context.user_data[KEY_PENDING_PROMPT] = prompt
+    workflow = context.user_data.get(KEY_WORKFLOW, cfg["default_workflow"])
+
+    await update.message.reply_text(
+        f"📝 *Generated prompt:*\n{prompt}\n\n"
+        f"🔧 Workflow: {workflow}\n\n"
+        "What would you like to do?",
+        parse_mode="Markdown",
+        reply_markup=confirm_keyboard(),
+    )
+ 
+ # Confirmation Keyboard: https://core.telegram.org/api/bots/buttons
+# This function creates the keyboard object and sends it back
+def confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Generate",    callback_data="confirm"),
+            InlineKeyboardButton("✏️ Edit prompt", callback_data="edit"),
+            InlineKeyboardButton("❌ Cancel",       callback_data="cancel"),
+        ]
+    ])
+ 
+async def get_file_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Get the SHA256 from the user"""
+    pass
+       
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -95,8 +142,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg   = context.bot_data["cfg"]
 
     if data == "1":
-        logger.info("[+] Select Backend")
-        await query.answer(text="Not yet implemented")
+        logger.info("[+] Perform SHA256 hash query with VT")
+        context.user_data["awaiting_sha256"] = True
+        await query.edit_message_text("🔎 Paste the SHA256 hash to search for:")
+        
         return
 
     if data == "2":
@@ -163,6 +212,7 @@ def main() -> None:
 
     #app.add_handler(conv_handler)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo)) # triggered when photo is uploaded
+    app.add_handler(MessageHandler(filters.TEXT, get_file_info))
     app.add_handler(CallbackQueryHandler(handle_callback)) # for menu button taps
     
     # Run the bot until the user presses Ctrl-C
