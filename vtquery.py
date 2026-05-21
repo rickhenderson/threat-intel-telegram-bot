@@ -1,7 +1,8 @@
+#!/usr/bin/env python
+from dotenv import load_dotenv
 import vt
 from dataclasses import dataclass
 
-load_dotenv()
 
 @dataclass
 class FileMetadata:
@@ -17,10 +18,14 @@ class FileMetadata:
 #    creation_date=0
 #)
 
+load_dotenv()
+
+
 def get_total_votes_by_hash(fileSHA256hash):
-    client = vt.Client(VIRUS_TOTAL_TOKEN)
-    file = client.get_object(f"/files/{fileSHA256hash}")
-    return file.total_votes
+    # client = vt.Client(VIRUS_TOTAL_TOKEN)
+    #file = client.get_object(f"/files/{fileSHA256hash}")
+    result = "nyi"
+    return result
 
 def get_file_name_from_vt(fileSHA256hash):
     client = vt.Client(VIRUS_TOTAL_TOKEN)
